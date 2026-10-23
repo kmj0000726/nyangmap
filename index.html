@@ -63,6 +63,7 @@ input[type=text],textarea{width:100%;border:1px solid var(--line);background:var
 textarea{min-height:64px;resize:vertical}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
+.chip .sw{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:-1px;border:1px solid rgba(0,0,0,.2)}
 .chip[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .list{display:grid;gap:8px}
 .item{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:12px;background:var(--bg);cursor:pointer;text-align:left;color:var(--fg);font:inherit;width:100%}
@@ -88,7 +89,7 @@ textarea{min-height:64px;resize:vertical}
 </header>
 <main>
   <div class="mapwrap">
-    <div class="hint" id="hint">고양이를 누르면 정보가 보여요</div>
+    <div class="hint" id="hint">고양이를 누르면 정보, 빈 곳을 누르면 제보</div>
     <div id="map"></div>
     <button class="locbtn" id="loc" title="내 위치로">◎</button>
     <button class="fab" id="fab">🐾 제보하기</button>
@@ -111,16 +112,22 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const TRAITS=["귀컷 (중성화)","목걸이 있음","새끼 데리고 다님","임신/수유 중","다친 곳 있음","몸집 큼","사람 따라다님"];
 const FUR={
-  "치즈":{fur:"#f0a447",inner:"#f7c98a",eye:"#3b2a14"},
-  "고등어":{fur:"#8d9aa6",inner:"#b8c2cb",eye:"#2a2f33",stripe:"#5c6873"},
-  "삼색":{fur:"#f1e9d8",inner:"#f1e9d8",eye:"#3b2a14",patch:["#f0a447","#3a3331"]},
-  "턱시도":{fur:"#3a3331",inner:"#f1e9d8",eye:"#e8d16a"},
-  "검정":{fur:"#3a3331",inner:"#5a5250",eye:"#e8d16a"},
-  "흰색":{fur:"#f6f3ea",inner:"#efd9d9",eye:"#3b2a14"},
-  "회색":{fur:"#9a9a9a",inner:"#c4c4c4",eye:"#2a2f33"},
+  "노랑":{fur:"#f0a447",inner:"#f7c98a",eye:"#3b2a14",sw:"#f0a447"},
+  "회색 줄무늬":{fur:"#8d9aa6",inner:"#b8c2cb",eye:"#2a2f33",stripe:"#5c6873",sw:"linear-gradient(90deg,#8d9aa6 0 40%,#5c6873 40% 60%,#8d9aa6 60%)"},
+  "흰·노랑·검정":{fur:"#f1e9d8",inner:"#f1e9d8",eye:"#3b2a14",patch:["#f0a447","#3a3331"],sw:"linear-gradient(135deg,#f1e9d8 0 34%,#f0a447 34% 67%,#3a3331 67%)"},
+  "검정·흰":{fur:"#3a3331",inner:"#f1e9d8",eye:"#e8d16a",sw:"linear-gradient(90deg,#3a3331 0 50%,#f1e9d8 50%)"},
+  "검정":{fur:"#3a3331",inner:"#5a5250",eye:"#e8d16a",sw:"#3a3331"},
+  "흰색":{fur:"#f6f3ea",inner:"#efd9d9",eye:"#3b2a14",sw:"#f6f3ea"},
+  "회색":{fur:"#9a9a9a",inner:"#c4c4c4",eye:"#2a2f33",sw:"#9a9a9a"},
+  "갈색":{fur:"#8a5a3c",inner:"#c9926f",eye:"#2a1f14",sw:"#8a5a3c"},
 };
+const OTHER="다른 색";
+const CUSTOM_FUR={fur:"#b89b7a",inner:"#dcc6ad",eye:"#3b2a14"};
+// 예전 이름으로 저장된 제보도 그려지게
+const LEGACY={"치즈":"노랑","고등어":"회색 줄무늬","삼색":"흰·노랑·검정","턱시도":"검정·흰"};
+function furOf(color){ return FUR[color]||FUR[LEGACY[color]]||CUSTOM_FUR; }
 function catSvg(color,sel){
-  const f=FUR[color]||FUR["치즈"]; const r=sel?20:16;
+  const f=furOf(color); const r=sel?20:16;
   const patches=f.patch?`<path d="M-7 -4 a5 5 0 0 1 6 -3 l-1 7 z" fill="${f.patch[0]}"/><path d="M8 -3 a4 4 0 0 0 -6 -2 l1 6 z" fill="${f.patch[1]}"/>`:"";
   const stripes=f.stripe?`<path d="M-3 -9 l1 4 M0 -10 l0 4 M3 -9 l-1 4" stroke="${f.stripe}" stroke-width="1.6" stroke-linecap="round" fill="none"/>`:"";
   return `<svg width="${r*2+4}" height="${r*2+4}" viewBox="${-r-2} ${-r-2} ${r*2+4} ${r*2+4}" xmlns="http://www.w3.org/2000/svg"><g>
@@ -163,23 +170,28 @@ async function load(){
 }
 function renderMarkers(){
   Object.values(markers).forEach(m=>m.remove()); markers={};
-  cats.forEach(c=>{ const m=L.marker([c.lat,c.lng],{icon:icon(c.color,selected===c.id)}).addTo(map);
+  cats.forEach(c=>{ const m=L.marker([c.lat,c.lng],{icon:icon(c.color,selected===c.id),bubblingMouseEvents:false}).addTo(map);
     m.on("click",()=>{ if(addMode) return; selected=c.id; renderMarkers(); renderDetail(); }); markers[c.id]=m; });
   $("count").textContent=cats.length?`${cats.length}마리`:"";
 }
 map.on("click",e=>{
-  if(!addMode) return;
+  if(!addMode) enterAddMode();
   pending={lat:e.latlng.lat,lng:e.latlng.lng};
   if(ghost) ghost.remove(); ghost=L.marker(e.latlng,{icon:icon(currentColor(),true),zIndexOffset:1000}).addTo(map);
   renderForm();
 });
-function currentColor(){ const b=sheetBody.querySelector('#f-color [aria-pressed="true"]'); return b?b.textContent:"치즈"; }
+function currentColor(){ const b=sheetBody.querySelector('#f-color [aria-pressed="true"]'); if(!b) return "노랑";
+  if(b.dataset.v===OTHER){ const t=sheetBody.querySelector("#f-color-custom"); return (t&&t.value.trim())||OTHER; } return b.dataset.v; }
 
-fab.onclick=()=>{
-  addMode=!addMode; if(ghost){ghost.remove();ghost=null;} pending=null; pendingPhoto=null; selected=null; renderMarkers();
-  if(addMode){ fab.textContent="✕ 취소"; hint.textContent="지도에서 고양이를 본 자리를 누르세요"; hint.classList.add("addmode"); renderForm(); }
-  else { fab.textContent="🐾 제보하기"; hint.textContent="고양이를 누르면 정보가 보여요"; hint.classList.remove("addmode"); renderHome(); }
-};
+function enterAddMode(){
+  addMode=true; selected=null; pendingPhoto=null; renderMarkers();
+  fab.textContent="✕ 취소"; hint.textContent="고양이를 본 자리를 누르세요"; hint.classList.add("addmode");
+}
+function exitAddMode(){
+  addMode=false; if(ghost){ghost.remove();ghost=null;} pending=null; pendingPhoto=null;
+  fab.textContent="🐾 제보하기"; hint.textContent="고양이를 누르면 정보, 빈 곳을 누르면 제보"; hint.classList.remove("addmode");
+}
+fab.onclick=()=>{ if(addMode){ exitAddMode(); renderHome(); } else { enterAddMode(); renderForm(); } };
 
 function renderHome(){
   if(!cats.length){ sheetBody.innerHTML=`<h2>아직 제보된 냥이가 없어요</h2><p class="note">오른쪽 아래 🐾 제보하기를 눌러 첫 번째 고양이를 올려주세요.</p>`; return; }
@@ -211,10 +223,11 @@ function renderDetail(){
 
 function renderForm(){
   const has=!!pending;
-  sheetBody.innerHTML=`<h2>${has?"어떤 냥이였나요?":"먼저 지도를 눌러 자리를 찍어주세요"}</h2>
+  sheetBody.innerHTML=`<h2>${has?"어떤 냥이였나요?":"지도에서 고양이를 본 자리를 눌러주세요"}</h2>
     <label>사진</label><div class="upl"><img class="prev" id="f-prev" alt=""><label class="btn primary" for="f-photo" style="flex:none;margin:0">📷 사진 찍기 / 고르기</label><input type="file" id="f-photo" accept="image/*"><span id="f-photo-msg" class="small" style="margin:0">선택 안 함</span></div>
     <label for="f-name">별명</label><input type="text" id="f-name" placeholder="예: 치즈, 노랑이, 회장님" maxlength="12">
-    <label>털 색깔</label><div class="chips" id="f-color">${Object.keys(FUR).map((k,i)=>`<button class="chip" type="button" aria-pressed="${i===0}">${k}</button>`).join("")}</div>
+    <label>털 색깔</label><div class="chips" id="f-color">${Object.keys(FUR).map((k,i)=>`<button class="chip" type="button" data-v="${k}" aria-pressed="${i===0}"><span class="sw" style="background:${FUR[k].sw}"></span>${k}</button>`).join("")}<button class="chip" type="button" data-v="${OTHER}" aria-pressed="false">✏️ ${OTHER}</button></div>
+    <input type="text" id="f-color-custom" placeholder="예: 갈색 줄무늬, 베이지" maxlength="12" style="margin-top:6px" hidden>
     <label>성격</label><div class="chips" id="f-temper"><button class="chip" type="button" aria-pressed="true">순함</button><button class="chip" type="button" aria-pressed="false">보통</button><button class="chip" type="button" aria-pressed="false">경계</button></div>
     <label>츄르</label><div class="chips" id="f-churu"><button class="chip" type="button" aria-pressed="true">환영</button><button class="chip" type="button" aria-pressed="false">관심 없음</button></div>
     <label>특징</label><div class="chips" id="f-traits">${TRAITS.map(t=>`<button class="chip" type="button" aria-pressed="false">${t}</button>`).join("")}</div>
@@ -222,7 +235,8 @@ function renderForm(){
     <div class="row" style="margin-top:12px"><button class="btn primary" id="f-save" ${has?"":"disabled"}>제보 올리기</button></div>`;
   ["f-color","f-temper","f-churu"].forEach(id=>sheetBody.querySelector("#"+id).querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
     ch.parentElement.querySelectorAll(".chip").forEach(o=>o.setAttribute("aria-pressed","false")); ch.setAttribute("aria-pressed","true");
-    if(id==="f-color"&&ghost) ghost.setIcon(icon(ch.textContent,true)); }));
+    if(id==="f-color"){ const cu=sheetBody.querySelector("#f-color-custom"); cu.hidden=ch.dataset.v!==OTHER; if(!cu.hidden) cu.focus(); if(ghost) ghost.setIcon(icon(currentColor(),true)); } }));
+  sheetBody.querySelector("#f-color-custom").oninput=()=>{ if(ghost) ghost.setIcon(icon(currentColor(),true)); };
   sheetBody.querySelectorAll("#f-traits .chip").forEach(ch=>ch.onclick=()=>ch.setAttribute("aria-pressed",ch.getAttribute("aria-pressed")!=="true"));
   if(pendingPhoto){ sheetBody.querySelector("#f-prev").src=pendingPhoto.preview; sheetBody.querySelector("#f-photo-msg").textContent="사진 첨부됨"; }
   sheetBody.querySelector("#f-photo").onchange=ev=>{
@@ -250,7 +264,7 @@ function renderForm(){
     }
     const {data,error}=await db.from("cats").insert({name,color,temper,churu,traits,note,photo_url,lat:pending.lat,lng:pending.lng}).select().single();
     if(error){ showToast("저장 실패: "+error.message); ev.target.disabled=false; ev.target.textContent="제보 올리기"; return; }
-    cats.unshift(data); fab.click(); selected=data.id; renderMarkers(); renderDetail(); showToast(`${name} 제보 완료 🐾`);
+    cats.unshift(data); exitAddMode(); selected=data.id; renderMarkers(); renderDetail(); showToast(`${name} 제보 완료 🐾`);
   };
 }
 load();
