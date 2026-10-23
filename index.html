@@ -12,7 +12,6 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&family=Noto+Sans+KR:wght@400;500;700&display=swap">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
 :root{
   --bg:#f3f1e4; --fg:#2f3328; --muted:#6f7560; --block:#e0dcc7; --park:#cfe0b0;
@@ -34,8 +33,6 @@ header .count{margin-left:auto;font-family:var(--display);font-size:18px;color:v
 main{flex:1;min-height:0;display:flex;flex-direction:column}
 .mapwrap{flex:1;min-height:0;position:relative}
 #map{width:100%;height:100%;background:var(--block)}
-.leaflet-container{font-family:var(--body)}
-@media (prefers-color-scheme:dark){ .leaflet-tile{filter:brightness(.72) contrast(1.05) saturate(.7)} }
 .hint{position:absolute;left:50%;transform:translateX(-50%);top:10px;z-index:500;background:var(--card);border:1px solid var(--line);
   border-radius:999px;padding:6px 12px;font-size:12.5px;color:var(--muted);white-space:nowrap;pointer-events:none;max-width:92%;overflow:hidden;text-overflow:ellipsis}
 .hint.addmode{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
@@ -77,8 +74,9 @@ textarea{min-height:64px;resize:vertical}
 .small{font-size:11.5px;color:var(--muted);margin-top:10px}
 .toast{position:absolute;left:50%;transform:translateX(-50%);bottom:84px;background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:13px;z-index:700}
 .toast[hidden]{display:none}
-.catpin{background:none;border:0}
+.catpin{cursor:pointer;line-height:0}
 .catpin svg{overflow:visible;filter:drop-shadow(0 2px 3px rgba(0,0,0,.25))}
+.copyright{position:absolute;right:6px;bottom:4px;font-size:10px;color:#666;z-index:400;pointer-events:none}
 </style>
 </head>
 <body>
@@ -101,7 +99,7 @@ textarea{min-height:64px;resize:vertical}
   </section>
 </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=6d60f2432d54f1354dea69c1cf91b73c&autoload=false"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 // ===== 설정 =====
@@ -144,11 +142,17 @@ function catSvg(color,sel){
       <path d="M-6 1 L-15 -1 M-6 2.5 L-15 3 M-6 4 L-14 7"/><path d="M6 1 L15 -1 M6 2.5 L15 3 M6 4 L14 7"/></g>
   </g></svg>`;
 }
-const icon=(color,sel)=>L.divIcon({className:"catpin",html:catSvg(color,sel),iconSize:[sel?44:36,sel?44:36],iconAnchor:[sel?22:18,sel?22:18]});
+// 카카오맵 위에 올리는 고양이 마커
+function makePin(lat,lng,color,sel,onClick,z){
+  const el=document.createElement("div"); el.className="catpin"; el.innerHTML=catSvg(color,sel);
+  if(onClick) el.addEventListener("click",ev=>{ ev.stopPropagation(); onClick(); });
+  const ov=new kakao.maps.CustomOverlay({position:new kakao.maps.LatLng(lat,lng),content:el,yAnchor:0.5,xAnchor:0.5,zIndex:z||1});
+  ov.setMap(map); ov._el=el; return ov;
+}
+function repaint(ov,color,sel){ ov._el.innerHTML=catSvg(color,sel); }
 
 // ===== 지도 =====
-const map=L.map("map",{zoomControl:false,attributionControl:true}).setView(DEFAULT_CENTER,15);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+let map;
 let cats=[], markers={}, addMode=false, pending=null, ghost=null, selected=null, pendingPhoto=null;
 
 const $=id=>document.getElementById(id);
@@ -159,9 +163,9 @@ function esc(s){ return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&
 
 function locate(){
   if(!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(p=>map.setView([p.coords.latitude,p.coords.longitude],16),()=>{},{enableHighAccuracy:true,timeout:6000});
+  navigator.geolocation.getCurrentPosition(p=>{ map.setLevel(3); map.setCenter(new kakao.maps.LatLng(p.coords.latitude,p.coords.longitude)); },()=>{},{enableHighAccuracy:true,timeout:6000});
 }
-$("loc").onclick=locate; locate();
+$("loc").onclick=locate;
 
 async function load(){
   const {data,error}=await db.from("cats").select("*").order("last_seen",{ascending:false}).limit(2000);
@@ -169,17 +173,16 @@ async function load(){
   cats=data; renderMarkers(); renderHome();
 }
 function renderMarkers(){
-  Object.values(markers).forEach(m=>m.remove()); markers={};
-  cats.forEach(c=>{ const m=L.marker([c.lat,c.lng],{icon:icon(c.color,selected===c.id),bubblingMouseEvents:false}).addTo(map);
-    m.on("click",()=>{ if(addMode) return; selected=c.id; renderMarkers(); renderDetail(); }); markers[c.id]=m; });
+  Object.values(markers).forEach(m=>m.setMap(null)); markers={};
+  cats.forEach(c=>{ markers[c.id]=makePin(c.lat,c.lng,c.color,selected===c.id,()=>{ if(addMode) return; selected=c.id; renderMarkers(); renderDetail(); }); });
   $("count").textContent=cats.length?`${cats.length}마리`:"";
 }
-map.on("click",e=>{
+function onMapClick(e){
   if(!addMode) enterAddMode();
-  pending={lat:e.latlng.lat,lng:e.latlng.lng};
-  if(ghost) ghost.remove(); ghost=L.marker(e.latlng,{icon:icon(currentColor(),true),zIndexOffset:1000}).addTo(map);
+  pending={lat:e.latLng.getLat(),lng:e.latLng.getLng()};
+  if(ghost) ghost.setMap(null); ghost=makePin(pending.lat,pending.lng,currentColor(),true,null,1000);
   renderForm();
-});
+}
 function currentColor(){ const b=sheetBody.querySelector('#f-color [aria-pressed="true"]'); if(!b) return "노랑";
   if(b.dataset.v===OTHER){ const t=sheetBody.querySelector("#f-color-custom"); return (t&&t.value.trim())||OTHER; } return b.dataset.v; }
 
@@ -188,21 +191,20 @@ function enterAddMode(){
   fab.textContent="✕ 취소"; hint.textContent="고양이를 본 자리를 누르세요"; hint.classList.add("addmode");
 }
 function exitAddMode(){
-  addMode=false; if(ghost){ghost.remove();ghost=null;} pending=null; pendingPhoto=null;
+  addMode=false; if(ghost){ghost.setMap(null);ghost=null;} pending=null; pendingPhoto=null;
   fab.textContent="🐾 제보하기"; hint.textContent="고양이를 누르면 정보, 빈 곳을 누르면 제보"; hint.classList.remove("addmode");
 }
 fab.onclick=()=>{ if(addMode){ exitAddMode(); renderHome(); } else { enterAddMode(); renderForm(); } };
 
 function renderHome(){
   if(!cats.length){ sheetBody.innerHTML=`<h2>아직 제보된 냥이가 없어요</h2><p class="note">오른쪽 아래 🐾 제보하기를 눌러 첫 번째 고양이를 올려주세요.</p>`; return; }
-  const b=map.getBounds(); let near=cats.filter(c=>b.contains([c.lat,c.lng])); if(!near.length) near=cats;
+  const b=map.getBounds(); let near=cats.filter(c=>b.contain(new kakao.maps.LatLng(c.lat,c.lng))); if(!near.length) near=cats;
   const recent=near.slice(0,6);
   sheetBody.innerHTML=`<h2>${near.length===cats.length?"최근 목격된 냥이":"이 근처 냥이"}</h2>
     <div class="list">${recent.map(c=>`<button class="item" data-open="${c.id}">${c.photo_url?`<img class="thumb" src="${esc(c.photo_url)}" alt="">`:""}<span class="nm">${esc(c.name)}</span><span class="tag">${esc(c.color)}</span><span class="sm">목격 ${c.seen}회 · ${timeAgo(c.last_seen)}</span></button>`).join("")}</div>
     <p class="small">제보는 모든 사람에게 공유돼요. 고양이 안전을 위해 정확한 집 주소는 피해주세요.</p>`;
-  sheetBody.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{ selected=b.dataset.open; const c=cats.find(x=>x.id===selected); map.panTo([c.lat,c.lng]); renderMarkers(); renderDetail(); });
+  sheetBody.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{ selected=b.dataset.open; const c=cats.find(x=>x.id===selected); map.panTo(new kakao.maps.LatLng(c.lat,c.lng)); renderMarkers(); renderDetail(); });
 }
-map.on("moveend",()=>{ if(!addMode&&!selected) renderHome(); });
 
 function renderDetail(){
   const c=cats.find(x=>x.id===selected); if(!c) return renderHome();
@@ -235,8 +237,8 @@ function renderForm(){
     <div class="row" style="margin-top:12px"><button class="btn primary" id="f-save" ${has?"":"disabled"}>제보 올리기</button></div>`;
   ["f-color","f-temper","f-churu"].forEach(id=>sheetBody.querySelector("#"+id).querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
     ch.parentElement.querySelectorAll(".chip").forEach(o=>o.setAttribute("aria-pressed","false")); ch.setAttribute("aria-pressed","true");
-    if(id==="f-color"){ const cu=sheetBody.querySelector("#f-color-custom"); cu.hidden=ch.dataset.v!==OTHER; if(!cu.hidden) cu.focus(); if(ghost) ghost.setIcon(icon(currentColor(),true)); } }));
-  sheetBody.querySelector("#f-color-custom").oninput=()=>{ if(ghost) ghost.setIcon(icon(currentColor(),true)); };
+    if(id==="f-color"){ const cu=sheetBody.querySelector("#f-color-custom"); cu.hidden=ch.dataset.v!==OTHER; if(!cu.hidden) cu.focus(); if(ghost) repaint(ghost,currentColor(),true); } }));
+  sheetBody.querySelector("#f-color-custom").oninput=()=>{ if(ghost) repaint(ghost,currentColor(),true); };
   sheetBody.querySelectorAll("#f-traits .chip").forEach(ch=>ch.onclick=()=>ch.setAttribute("aria-pressed",ch.getAttribute("aria-pressed")!=="true"));
   if(pendingPhoto){ sheetBody.querySelector("#f-prev").src=pendingPhoto.preview; sheetBody.querySelector("#f-photo-msg").textContent="사진 첨부됨"; }
   sheetBody.querySelector("#f-photo").onchange=ev=>{
@@ -267,7 +269,12 @@ function renderForm(){
     cats.unshift(data); exitAddMode(); selected=data.id; renderMarkers(); renderDetail(); showToast(`${name} 제보 완료 🐾`);
   };
 }
-load();
+kakao.maps.load(()=>{
+  map=new kakao.maps.Map($("map"),{center:new kakao.maps.LatLng(DEFAULT_CENTER[0],DEFAULT_CENTER[1]),level:4});
+  kakao.maps.event.addListener(map,"click",onMapClick);
+  kakao.maps.event.addListener(map,"idle",()=>{ if(!addMode&&!selected) renderHome(); });
+  locate(); load();
+});
 </script>
 </body>
 </html>
