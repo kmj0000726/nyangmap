@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>냥지도 — 우리 동네 길고양이 지도</title>
-<meta name="description" content="동네 길고양이를 제보하고 함께 돌보는 지도">
+<meta name="description" content="동네 길고양이를 함께 돌보는 지도. 정확한 위치는 저장하지 않아요.">
 <meta name="theme-color" content="#f3f1e4">
 <meta property="og:type" content="website">
 <meta property="og:title" content="냥지도 — 우리 동네 길고양이 지도">
-<meta property="og:description" content="동네 길고양이를 제보하고 함께 돌보는 지도. 어디에 어떤 냥이가 사는지 한눈에.">
+<meta property="og:description" content="동네 길고양이를 함께 돌보는 지도. 정확한 위치는 저장하지 않아요.">
 <meta property="og:url" content="https://nyangmap.vercel.app">
 <meta property="og:image" content="https://nyangmap.vercel.app/og.png">
 <meta property="og:image:width" content="1200">
@@ -90,7 +90,7 @@ textarea{min-height:64px;resize:vertical}
 <body>
 <header>
   <h1>냥지도</h1>
-  <span class="sub">우리 동네 길고양이 제보 지도</span>
+  <span class="sub">같이 돌보는 길고양이 지도 · 정확한 위치는 저장하지 않아요</span>
   <span class="count" id="count"></span>
 </header>
 <main>
@@ -116,7 +116,7 @@ const SUPABASE_KEY = "sb_publishable_IuXz1PpELTi3I_6N7VJW-g_Gf5mKz4b";
 const DEFAULT_CENTER = [37.5665, 126.9780]; // 서울시청 — 위치 권한 없을 때
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const TRAITS=["귀컷 (중성화)","목걸이 있음","새끼 데리고 다님","임신/수유 중","다친 곳 있음","몸집 큼","사람 따라다님"];
+const TRAITS=["귀컷 (중성화 완료)","중성화 안 됨","다친 곳 있음","아파 보임","임신/수유 중","새끼 데리고 다님","목걸이 있음 (집냥이?)","사람 따라다님"];
 const FUR={
   "노랑":{fur:"#f0a447",inner:"#f7c98a",eye:"#3b2a14",sw:"#f0a447"},
   "회색 줄무늬":{fur:"#8d9aa6",inner:"#b8c2cb",eye:"#2a2f33",stripe:"#5c6873",sw:"linear-gradient(90deg,#8d9aa6 0 40%,#5c6873 40% 60%,#8d9aa6 60%)"},
@@ -150,6 +150,16 @@ function catSvg(color,sel){
       <path d="M-6 1 L-15 -1 M-6 2.5 L-15 3 M-6 4 L-14 7"/><path d="M6 1 L15 -1 M6 2.5 L15 3 M6 4 L14 7"/></g>
   </g></svg>`;
 }
+// ===== 위치 흐리기 =====
+// 학대 위험 때문에 정확한 좌표는 저장하지도, 보여주지도 않아요. 약 200m 격자의 중심으로 뭉개요.
+const GRID=0.0018; // 위도 기준 약 200m
+function fuzz(lat,lng){ return {lat:(Math.floor(lat/GRID)+0.5)*GRID, lng:(Math.floor(lng/(GRID*1.25))+0.5)*GRID*1.25}; }
+const RADIUS=120; // 표시 원 반경(m)
+let circles=[];
+function makeArea(lat,lng,sel){
+  const c=new kakao.maps.Circle({center:new kakao.maps.LatLng(lat,lng),radius:RADIUS,strokeWeight:sel?2:1,strokeColor:"#e8862b",strokeOpacity:sel?.9:.5,fillColor:"#e8862b",fillOpacity:sel?.18:.1});
+  c.setMap(map); circles.push(c); return c;
+}
 // 카카오맵 위에 올리는 고양이 마커
 function makePin(lat,lng,color,sel,onClick,z){
   const el=document.createElement("div"); el.className="catpin"; el.innerHTML=catSvg(color,sel);
@@ -161,7 +171,7 @@ function repaint(ov,color,sel){ ov._el.innerHTML=catSvg(color,sel); }
 
 // ===== 지도 =====
 let map;
-let cats=[], markers={}, addMode=false, pending=null, ghost=null, selected=null, pendingPhoto=null;
+let cats=[], markers={}, addMode=false, pending=null, ghost=null, ghostArea=null, selected=null, pendingPhoto=null;
 
 const $=id=>document.getElementById(id);
 const sheetBody=$("sheetBody"), hint=$("hint"), fab=$("fab"), toast=$("toast");
@@ -178,17 +188,19 @@ $("loc").onclick=locate;
 async function load(){
   const {data,error}=await db.from("cats").select("*").order("last_seen",{ascending:false}).limit(2000);
   if(error){ sheetBody.innerHTML=`<h2>불러오지 못했어요</h2><p class="note">${esc(error.message)}</p>`; return; }
-  cats=data; renderMarkers(); renderHome();
+  cats=data.map(c=>Object.assign(c,fuzz(c.lat,c.lng))); renderMarkers(); renderHome();
 }
 function renderMarkers(){
   Object.values(markers).forEach(m=>m.setMap(null)); markers={};
-  cats.forEach(c=>{ markers[c.id]=makePin(c.lat,c.lng,c.color,selected===c.id,()=>{ if(addMode) return; selected=c.id; renderMarkers(); renderDetail(); }); });
+  circles.forEach(c=>c.setMap(null)); circles=[];
+  cats.forEach(c=>{ makeArea(c.lat,c.lng,selected===c.id); markers[c.id]=makePin(c.lat,c.lng,c.color,selected===c.id,()=>{ if(addMode) return; selected=c.id; renderMarkers(); renderDetail(); }); });
   $("count").textContent=cats.length?`${cats.length}마리`:"";
 }
 function onMapClick(e){
   if(!addMode) enterAddMode();
-  pending={lat:e.latLng.getLat(),lng:e.latLng.getLng()};
-  if(ghost) ghost.setMap(null); ghost=makePin(pending.lat,pending.lng,currentColor(),true,null,1000);
+  pending=fuzz(e.latLng.getLat(),e.latLng.getLng());
+  if(ghost) ghost.setMap(null); if(ghostArea) ghostArea.setMap(null);
+  ghostArea=makeArea(pending.lat,pending.lng,true); ghost=makePin(pending.lat,pending.lng,currentColor(),true,null,1000);
   renderForm();
 }
 function currentColor(){ const b=sheetBody.querySelector('#f-color [aria-pressed="true"]'); if(!b) return "노랑";
@@ -196,30 +208,30 @@ function currentColor(){ const b=sheetBody.querySelector('#f-color [aria-pressed
 
 function enterAddMode(){
   addMode=true; selected=null; pendingPhoto=null; renderMarkers();
-  fab.textContent="✕ 취소"; hint.textContent="고양이를 본 자리를 누르세요"; hint.classList.add("addmode"); hint.hidden=false;
+  fab.textContent="✕ 취소"; hint.textContent="고양이를 본 근처를 누르세요 (정확한 자리는 저장 안 돼요)"; hint.classList.add("addmode"); hint.hidden=false;
 }
 function exitAddMode(){
-  addMode=false; if(ghost){ghost.setMap(null);ghost=null;} pending=null; pendingPhoto=null;
+  addMode=false; if(ghost){ghost.setMap(null);ghost=null;} if(ghostArea){ghostArea.setMap(null);ghostArea=null;} pending=null; pendingPhoto=null;
   fab.textContent="🐾 제보하기"; hint.hidden=true; hint.classList.remove("addmode");
 }
 fab.onclick=()=>{ if(addMode){ exitAddMode(); renderHome(); } else { enterAddMode(); renderForm(); } };
 
 function renderHome(){
-  if(!cats.length){ sheetBody.innerHTML=`<h2>아직 제보된 냥이가 없어요</h2><p class="note">오른쪽 아래 🐾 제보하기를 눌러 첫 번째 고양이를 올려주세요.</p>`; return; }
+  if(!cats.length){ sheetBody.innerHTML=`<h2>아직 등록된 냥이가 없어요</h2><p class="note">지도를 눌러 돌보는 고양이를 등록해주세요. 위치는 약 200m 범위로만 저장돼요.</p>`; return; }
   const b=map.getBounds(); let near=cats.filter(c=>b.contain(new kakao.maps.LatLng(c.lat,c.lng))); if(!near.length) near=cats;
   const recent=near.slice(0,6);
   sheetBody.innerHTML=`<h2>${near.length===cats.length?"최근 목격된 냥이":"이 근처 냥이"}</h2>
     <div class="list">${recent.map(c=>`<button class="item" data-open="${c.id}">${c.photo_url?`<img class="thumb" src="${esc(c.photo_url)}" alt="">`:""}<span class="nm">${esc(c.name)}</span><span class="tag">${esc(c.color)}</span><span class="sm">목격 ${c.seen}회 · ${timeAgo(c.last_seen)}</span></button>`).join("")}</div>
-    <p class="small">제보는 모든 사람에게 공유돼요. 고양이 안전을 위해 정확한 집 주소는 피해주세요.</p>`;
+    <p class="small">🔒 모든 위치는 약 200m 범위로 흐려져 저장돼요. 정확한 급식소·잠자리 위치는 적지 말아주세요. 학대 목격 시 112.</p>`;
   sheetBody.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{ selected=b.dataset.open; const c=cats.find(x=>x.id===selected); map.panTo(new kakao.maps.LatLng(c.lat,c.lng)); renderMarkers(); renderDetail(); });
 }
 
 function renderDetail(){
   const c=cats.find(x=>x.id===selected); if(!c) return renderHome();
   sheetBody.innerHTML=`<h2>${esc(c.name)}</h2>
-    <div class="meta"><span>목격 ${c.seen}회</span><span>마지막 ${timeAgo(c.last_seen)}</span><span>첫 제보 ${timeAgo(c.created_at)}</span></div>
+    <div class="meta"><span>📍 이 근처 약 200m</span><span>목격 ${c.seen}회</span><span>마지막 ${timeAgo(c.last_seen)}</span></div>
     ${c.photo_url?`<img class="photo" src="${esc(c.photo_url)}" alt="${esc(c.name)} 사진">`:""}
-    <div class="tags"><span class="tag">${esc(c.color)}</span><span class="tag ${c.temper==="경계"?"wary":""}">${esc(c.temper)}</span>${c.churu?'<span class="tag">츄르 환영</span>':""}${(c.traits||[]).map(t=>`<span class="tag wary">${esc(t)}</span>`).join("")}</div>
+    <div class="tags"><span class="tag">${esc(c.color)}</span><span class="tag ${c.temper==="경계"?"wary":""}">${esc(c.temper)}</span>${c.churu?'<span class="tag">돌보는 분 있음</span>':""}${(c.traits||[]).map(t=>`<span class="tag wary">${esc(t)}</span>`).join("")}</div>
     <p class="note">${esc(c.note)||"아직 메모가 없어요."}</p>
     <div class="row"><button class="btn primary" id="seen">오늘 봤어요 +1</button><button class="btn" id="back">목록으로</button></div>`;
   sheetBody.querySelector("#seen").onclick=async ev=>{
@@ -233,15 +245,16 @@ function renderDetail(){
 
 function renderForm(){
   const has=!!pending;
-  sheetBody.innerHTML=`<h2>${has?"어떤 냥이였나요?":"지도에서 고양이를 본 자리를 눌러주세요"}</h2>
+  sheetBody.innerHTML=`<h2>${has?"어떤 냥이인가요?":"지도에서 고양이를 본 근처를 눌러주세요"}</h2>
+    <p class="small" style="margin:0 0 4px">🔒 정확한 위치는 저장되지 않아요. 약 200m 범위로 흐려져요.</p>
     <label>사진</label><div class="upl"><img class="prev" id="f-prev" alt=""><label class="btn primary" for="f-photo" style="flex:none;margin:0">📷 사진 찍기 / 고르기</label><input type="file" id="f-photo" accept="image/*"><span id="f-photo-msg" class="small" style="margin:0">선택 안 함</span></div>
     <label for="f-name">별명</label><input type="text" id="f-name" placeholder="예: 치즈, 노랑이, 회장님" maxlength="12">
     <label>털 색깔</label><div class="chips" id="f-color">${Object.keys(FUR).map((k,i)=>`<button class="chip" type="button" data-v="${k}" aria-pressed="${i===0}"><span class="sw" style="background:${FUR[k].sw}"></span>${k}</button>`).join("")}<button class="chip" type="button" data-v="${OTHER}" aria-pressed="false">✏️ ${OTHER}</button></div>
     <input type="text" id="f-color-custom" placeholder="예: 갈색 줄무늬, 베이지" maxlength="12" style="margin-top:6px" hidden>
     <label>성격</label><div class="chips" id="f-temper"><button class="chip" type="button" aria-pressed="true">순함</button><button class="chip" type="button" aria-pressed="false">보통</button><button class="chip" type="button" aria-pressed="false">경계</button></div>
-    <label>츄르</label><div class="chips" id="f-churu"><button class="chip" type="button" aria-pressed="true">환영</button><button class="chip" type="button" aria-pressed="false">관심 없음</button></div>
-    <label>특징</label><div class="chips" id="f-traits">${TRAITS.map(t=>`<button class="chip" type="button" aria-pressed="false">${t}</button>`).join("")}</div>
-    <label for="f-note">메모</label><textarea id="f-note" placeholder="어디서 자주 보이는지, 특징은 뭔지"></textarea>
+    <label>돌보는 분</label><div class="chips" id="f-churu"><button class="chip" type="button" aria-pressed="false">있어요</button><button class="chip" type="button" aria-pressed="true">몰라요</button></div>
+    <label>상태 · 돌봄 정보</label><div class="chips" id="f-traits">${TRAITS.map(t=>`<button class="chip" type="button" aria-pressed="false">${t}</button>`).join("")}</div>
+    <label for="f-note">메모</label><textarea id="f-note" placeholder="건강 상태, 필요한 도움 등 (정확한 장소는 적지 말아주세요)"></textarea>
     <div class="row" style="margin-top:12px"><button class="btn primary" id="f-save" ${has?"":"disabled"}>제보 올리기</button></div>`;
   ["f-color","f-temper","f-churu"].forEach(id=>sheetBody.querySelector("#"+id).querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{
     ch.parentElement.querySelectorAll(".chip").forEach(o=>o.setAttribute("aria-pressed","false")); ch.setAttribute("aria-pressed","true");
@@ -262,7 +275,7 @@ function renderForm(){
     const name=sheetBody.querySelector("#f-name").value.trim()||"이름 없는 냥이";
     const color=currentColor();
     const temper=sheetBody.querySelector('#f-temper [aria-pressed="true"]').textContent;
-    const churu=sheetBody.querySelector('#f-churu [aria-pressed="true"]').textContent==="환영";
+    const churu=sheetBody.querySelector('#f-churu [aria-pressed="true"]').textContent==="있어요";
     const traits=[...sheetBody.querySelectorAll('#f-traits [aria-pressed="true"]')].map(b=>b.textContent);
     const note=sheetBody.querySelector("#f-note").value.trim();
     let photo_url=null;
@@ -274,7 +287,7 @@ function renderForm(){
     }
     const {data,error}=await db.from("cats").insert({name,color,temper,churu,traits,note,photo_url,lat:pending.lat,lng:pending.lng}).select().single();
     if(error){ showToast("저장 실패: "+error.message); ev.target.disabled=false; ev.target.textContent="제보 올리기"; return; }
-    cats.unshift(data); exitAddMode(); selected=data.id; renderMarkers(); renderDetail(); showToast(`${name} 제보 완료 🐾`);
+    cats.unshift(data); exitAddMode(); selected=data.id; renderMarkers(); renderDetail(); showToast(`${name} 등록 완료 🐾 위치는 흐려져 저장됐어요`);
   };
 }
 kakao.maps.load(()=>{
