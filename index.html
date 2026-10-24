@@ -95,7 +95,7 @@ textarea{min-height:64px;resize:vertical}
 </header>
 <main>
   <div class="mapwrap">
-    <div class="hint" id="hint">고양이를 누르면 정보, 빈 곳을 누르면 제보</div>
+    <div class="hint" id="hint" hidden></div>
     <div id="map"></div>
     <button class="locbtn" id="loc" title="내 위치로">◎</button>
     <button class="fab" id="fab">🐾 제보하기</button>
@@ -196,11 +196,11 @@ function currentColor(){ const b=sheetBody.querySelector('#f-color [aria-pressed
 
 function enterAddMode(){
   addMode=true; selected=null; pendingPhoto=null; renderMarkers();
-  fab.textContent="✕ 취소"; hint.textContent="고양이를 본 자리를 누르세요"; hint.classList.add("addmode");
+  fab.textContent="✕ 취소"; hint.textContent="고양이를 본 자리를 누르세요"; hint.classList.add("addmode"); hint.hidden=false;
 }
 function exitAddMode(){
   addMode=false; if(ghost){ghost.setMap(null);ghost=null;} pending=null; pendingPhoto=null;
-  fab.textContent="🐾 제보하기"; hint.textContent="고양이를 누르면 정보, 빈 곳을 누르면 제보"; hint.classList.remove("addmode");
+  fab.textContent="🐾 제보하기"; hint.hidden=true; hint.classList.remove("addmode");
 }
 fab.onclick=()=>{ if(addMode){ exitAddMode(); renderHome(); } else { enterAddMode(); renderForm(); } };
 
