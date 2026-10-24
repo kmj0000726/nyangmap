@@ -188,6 +188,9 @@ $("loc").onclick=locate;
 async function load(){
   const {data,error}=await db.from("cats").select("*").order("last_seen",{ascending:false}).limit(2000);
   if(error){ sheetBody.innerHTML=`<h2>불러오지 못했어요</h2><p class="note">${esc(error.message)}</p>`; return; }
+  // 예전에 정확한 좌표로 저장된 제보가 있으면 DB도 흐린 값으로 덮어써요 (한 번만 실행됨)
+  const fixes=data.filter(c=>{ const f=fuzz(c.lat,c.lng); return Math.abs(f.lat-c.lat)>1e-9||Math.abs(f.lng-c.lng)>1e-9; });
+  for(const c of fixes){ const f=fuzz(c.lat,c.lng); db.from("cats").update({lat:f.lat,lng:f.lng}).eq("id",c.id).then(()=>{}); }
   cats=data.map(c=>Object.assign(c,fuzz(c.lat,c.lng))); renderMarkers(); renderHome();
 }
 function renderMarkers(){
