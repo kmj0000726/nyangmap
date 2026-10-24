@@ -33,11 +33,10 @@
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font-family:var(--body);display:flex;flex-direction:column;overflow:hidden;
   padding-top:env(safe-area-inset-top,0px)}
-header{padding:10px max(16px,env(safe-area-inset-right,0px)) 6px max(16px,env(safe-area-inset-left,0px));
-  display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--line);background:var(--bg);z-index:5}
-header h1{font-family:var(--display);font-size:30px;font-weight:700;margin:0;letter-spacing:-.5px}
-header .sub{color:var(--muted);font-size:12.5px}
-header .count{margin-left:auto;font-family:var(--display);font-size:18px;color:var(--accent);font-weight:700;font-variant-numeric:tabular-nums}
+header{padding:10px max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));
+  display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line);background:var(--bg);z-index:5}
+header h1{font-family:var(--display);font-size:30px;font-weight:700;margin:0;letter-spacing:-.5px;white-space:nowrap;flex:none}
+header .sub{color:var(--muted);font-size:12.5px;line-height:1.35}
 main{flex:1;min-height:0;display:flex;flex-direction:column}
 .mapwrap{flex:1;min-height:0;position:relative}
 #map{width:100%;height:100%;background:var(--block)}
@@ -90,8 +89,7 @@ textarea{min-height:64px;resize:vertical}
 <body>
 <header>
   <h1>냥지도</h1>
-  <span class="sub">같이 돌보는 길고양이 지도 · 정확한 위치는 저장하지 않아요</span>
-  <span class="count" id="count"></span>
+  <span class="sub">같이 돌보는 길냥이 지도,<br>정확한 위치는 저장하지 않아요.</span>
 </header>
 <main>
   <div class="mapwrap">
@@ -211,7 +209,6 @@ function renderMarkers(){
   Object.values(markers).forEach(m=>m.setMap(null)); markers={};
   circles.forEach(c=>c.setMap(null)); circles=[];
   cats.forEach(c=>{ const sv=isSensitive(c.traits); makeArea(c.lat,c.lng,selected===c.id,sv); markers[c.id]=makePin(c.lat,c.lng,c.color,selected===c.id,()=>{ if(addMode) return; selected=c.id; renderMarkers(); renderDetail(); },1,sv); });
-  $("count").textContent=cats.length?`${cats.length}마리`:"";
 }
 function onMapClick(e){
   if(!addMode) enterAddMode();
@@ -271,8 +268,8 @@ function renderForm(){
     <label>털 색깔</label><div class="chips" id="f-color">${Object.keys(FUR).map((k,i)=>`<button class="chip" type="button" data-v="${k}" aria-pressed="${i===0}"><span class="sw" style="background:${FUR[k].sw}"></span>${k}</button>`).join("")}<button class="chip" type="button" data-v="${OTHER}" aria-pressed="false">✏️ ${OTHER}</button></div>
     <input type="text" id="f-color-custom" placeholder="예: 갈색 줄무늬, 베이지" maxlength="12" style="margin-top:6px" hidden>
     <label>성격</label><div class="chips" id="f-temper"><button class="chip" type="button" aria-pressed="true">순함</button><button class="chip" type="button" aria-pressed="false">보통</button><button class="chip" type="button" aria-pressed="false">경계</button></div>
-    <label>공개 범위</label><div class="chips" id="f-vis"><button class="chip" type="button" aria-pressed="true">🌏 모두에게</button><button class="chip" type="button" aria-pressed="false">🔒 나만 보기</button></div>
-    <p class="small" id="f-vis-note" style="margin:4px 0 0">모두에게: 약 200m 범위로 흐려져 공유돼요. 나만 보기: 이 폰에만 저장되고 서버에 올라가지 않아요.</p>
+    <label>공개 범위</label><div class="chips" id="f-vis"><button class="chip" type="button" aria-pressed="true">🔒 나만 보기</button><button class="chip" type="button" aria-pressed="false">🌏 모두에게</button></div>
+    <p class="small" id="f-vis-note" style="margin:4px 0 0">나만 보기: 이 폰에만 저장되고 서버에 올라가지 않아요. 모두에게: 약 200m 범위로 흐려져 공유돼요.</p>
     <label>돌보는 분</label><div class="chips" id="f-churu"><button class="chip" type="button" aria-pressed="false">있어요</button><button class="chip" type="button" aria-pressed="true">몰라요</button></div>
     <label>상태 · 돌봄 정보</label><div class="chips" id="f-traits">${TRAITS.map(t=>`<button class="chip" type="button" aria-pressed="false">${t}</button>`).join("")}</div>
     <label for="f-note">메모</label><textarea id="f-note" placeholder="건강 상태, 필요한 도움 등 (정확한 장소는 적지 말아주세요)"></textarea>
